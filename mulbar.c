@@ -1,4 +1,4 @@
-/* multiple sleeping barbers solution - suban */
+/* multiple sleeping barbers solution - suban (May 11, 2006) */
 
 #include<semaphore.h>
 #include<pthread.h>
@@ -6,9 +6,9 @@
 
 /* globals */
 
-#define totalcustomers  10
+#define totalcustomers  100
 #define totalbarbers  3
-#define maxcapacity  6
+#define maxcapacity  10
 #define totalchairs  3
 #define totalfilmfares  3
 
@@ -32,6 +32,7 @@ sem_t leave_bchair[totalchairs];
 //                Q2 pipe between customer <-> cashcounter */
 sem_t mutex3;
 sem_t mutex4;
+sem_t mutex5;
 
 //semaphore readywithpayment = 0; /* cashcounter waits for customer */
 sem_t readywithpayment;
@@ -64,9 +65,34 @@ void read_pipe(readfd,value,status)
      *status = (char)n;
 }
 
+
 void Customer(CustomerId) {
  int i,k;
 
+     void occupychair() {
+        /* barberchairs, here we come to select */
+         /*choose a free chair. show preference in order - simplest.
+           perhaps the first chair has a lurid interesting poster
+           ahead on the wall and we wish to be as close as possible? 
+	   chair[i] = -1 means it is unoccupied */
+         i = 0;
+         while ((chair[i] != -1) && (i < totalchairs)) i++;
+         if (i == totalchairs) {
+            printf("this is not possible! we are here because at least 1 chair empty!");
+            printf("which idiot sem_posted barberchair? psychoanalysis suggested!");
+            exit(0);
+         }
+         else {
+             /* occupy chair i */
+             /* the secure selection ensures we aren't sitting on somebody's lap*/
+              chair[i] = CustomerId;
+              freechairs--; 
+	      printf("Customer %d occupies chair %d. freechairs = %d\n",CustomerId,i,freechairs);
+         }
+     }
+
+
+    /* Customer process starts */
     /* stand outside patiently if no room in shop */
     sem_wait(&max_capacity);
         printf("Customer %d enters shop\n",CustomerId);
@@ -86,11 +112,12 @@ void Customer(CustomerId) {
 	       printf("Customer %d deciding what to read\n",CustomerId);
                sem_wait(&mutexfilmfare);
                if (freefilmfares <= 0) {
-	         printf("Customer %d reads S+G OS\n",CustomerId);
-		}
-	       freefilmfares--;
+                 printf("Customer %d reads S+G OS\n",CustomerId);
+               }
+               freefilmfares--;
+               sem_wait(&filmfare);
                sem_post(&mutexfilmfare);
-               sem_wait(&filmfare); 
+
             
             /* enact read filmfare by sem-wait on barberchair.
                same reason as above.*/
@@ -99,33 +126,13 @@ void Customer(CustomerId) {
                /*release filmfare*/
                sem_wait(&mutexfilmfare);
                freefilmfares++;
+	       occupychair();
                sem_post(&mutexfilmfare);
                sem_post(&filmfare);
                printf("Customer %d released Filmfare\n",CustomerId);
         }  
-        else { sem_post(&mutexfilmfare);sem_post(&mutex2);sem_wait(&barberchair); }
+        else { sem_wait(&barberchair);occupychair();sem_post(&mutexfilmfare);sem_post(&mutex2); }
 
-        /* barberchairs, here we come to select */
-         /*choose a free chair. show preference in order - simplest.
-           perhaps the first chair has a lurid interesting poster
-           ahead on the wall and we wish to be as close as possible? 
-	   chair[i] = -1 means it is unoccupied */
-	 sem_wait(&mutex2);
-         i = 0;
-         while ((chair[i] != -1) && (i < totalchairs)) i++;
-         if (i == totalchairs) {
-            printf("this is not possible! we are here because at least 1 chair empty!");
-            printf("which idiot sem_posted barberchair? psychoanalysis suggested!");
-            exit(0);
-         }
-         else {
-             /* occupy chair i */
-             /* the secure selection ensures we aren't sitting on somebody's lap*/
-              chair[i] = CustomerId;
-              freechairs--; 
-	      printf("Customer %d occupies chair %d. freechairs = %d\n",CustomerId,i,freechairs);
-         }
-         sem_post(&mutex2);
 
          /* now that we're properly seated, we're ready for a hair cut*/
          /* let's put our name and our chair's name in a pipe to barber */
@@ -134,8 +141,8 @@ void Customer(CustomerId) {
 //              enqueue(Q1,(CustomerId,i)); 
 	      write_pipe(pipe1[1],CustomerId);
 	      write_pipe(pipe1[1],i);
-         sem_post(&mutex3);
          sem_post(&cust_ready);
+         sem_post(&mutex3);
 
          /*wait for sem_post from barber that hair cut done */
          sem_wait(&finished[CustomerId]);
